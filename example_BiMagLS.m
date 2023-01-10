@@ -45,7 +45,8 @@ else
 end
 
 %% Parameters
-N_vec = [1,3,5,10:10:40]; % spatial orders to test
+% N_vec = [1,3,5,10:10:40]; % spatial orders to test
+N_vec = [1,2,3,5,7]; % spatial orders to test
 Nref = 44; % reference (very high) spatial order
 r = 0.0875; % head radius = 8.75 cm
 c = 343; % speed of sound
@@ -54,6 +55,7 @@ ildJND = 0.6; % ILD JND for plots, according to Klockgether 2016
 
 % HRTF file
 hrirname = 'hrtfs/FABIAN_HRIR_measured_HATO_0.sofa';
+% hrirname = 'hrtfs/FABIAN_HRIR_measured_HATO_0_48k_DFE.sofa'; % mtm added -  NOTE: 48k, diffuse-field equalized
 
 % Working directory
 workdir = 'processed_data'; % change as needed
@@ -84,6 +86,36 @@ H = ffth(h); % to frequency domain
 nfreqs = size(H,1);
 f = linspace(0,fs/2,nfreqs).';
 
+%% Defining test conditions 
+% 1. MagLS
+test_conditions{1}.name = 'MagLS';
+test_conditions{1}.preproc = 'MagLS';
+% 2. TA (time-aligned HRTF)
+test_conditions{2}.name = 'TA';
+test_conditions{2}.preproc = 'TA';
+% 3. BiMagLS
+test_conditions{3}.name = 'BiMagLS';
+test_conditions{3}.preproc = 'BiMagLS';
+
+ncond = length(test_conditions);
+
+%   EQ = one of the available equalisation options:
+%       0 = no EQ (default)
+%       1 = covariance constraint [9, sec.4.11.3]
+%       2 = diffuse field EQ (HRF from [8])
+%       3 = spherical head filters (SHF from [8]), adapted to tapering 
+%           weights if appropriate [6]
+flag_EQ = 1;
+%   tapering = apply weights to high SH orders to reduce side lobes:
+%       0 = off (default)
+%       1 = original Hann weights from Hold et al (2019)
+%       2 = improved (shorter) Hann window 
+%       3 = max-rE weights from Zotter and Frank (2012), non-normalized
+%       4 = same as 3, but normalize weights (McKenzie et al, 2018)
+flag_taper = 0;
+%   dualBand = whether to use dual-band tapering (def=false)
+flag_dualBand = false;
+
 %% Get high-order Hnm
 filename = sprintf('%s/hnm/ref.mat',workdir);
 if isfile(filename) % load if it already exists
@@ -104,18 +136,6 @@ else
     save(filename,'hnm_ref','Hnm_TA_ref','Hnm_mag_ref','fs')
 end
 Hnm_ref = ffth(hnm_ref);
-
-%% Defining test conditions
-ncond = 3; 
-% 1. MagLS
-test_conditions{1}.name = 'MagLS';
-test_conditions{1}.preproc = 'MagLS';
-% 2. TA (time-aligned HRTF)
-test_conditions{2}.name = 'TA';
-test_conditions{2}.preproc = 'TA';
-% 3. BiMagLS
-test_conditions{3}.name = 'BiMagLS';
-test_conditions{3}.preproc = 'BiMagLS';
 
 %% Define a few direction subsets
 % 1. Nearest neighbours to 110-point Lebedev grid
@@ -141,16 +161,26 @@ fprintf('Generating hnms...\n')
 for N=N_vec % iterate through spatial orders
     fprintf('Processing order %d...\n',N);
     for i=1:ncond
+%         name = test_conditions{i}.name;
         name = test_conditions{i}.name;
+        if flag_EQ, name = [name '+EQ' num2str(flag_EQ)]; end
+        if flag_taper, name = [name '+tap' num2str(flag_taper)]; end
+        if flag_dualBand, name = [name '+dualBnd']; end
         preproc = test_conditions{i}.preproc;
         filename = sprintf('%s/hnm/ord%0.2d_%s.mat',workdir,N,name);
         if isfile(filename)
             fprintf('\tFound %s. Skipping...\n',filename)
         else
             fprintf('\tGenerating hnm...\n');
-            [hnm,~,varOut] = toSH(h,N,'az',az,'el',el,'fs',fs,'mode',preproc);
-            fprintf('\tSaving %s...\n',filename)
-            save(filename,'hnm','varOut')
+%             [hnm,~,varOut] = toSH(h,N,'az',az,'el',el,'fs',fs,'mode',preproc);
+            [hnm,~,varOut] = toSH(h,N,'az',az,'el',el,'fs',fs,'mode',preproc, ...
+                'EQ', flag_EQ, ...
+                'tapering', flag_taper, ...
+                'dualBand', flag_dualBand ...
+                ); % mtm - EQ=1 add covariance constraint
+            fprintf('\t...done.\n\tSaving %s...\n',filename)
+            save(filename,'hnm','varOut','fs') % mtm - add fs
+            fprintf('\t...done.\n')
         end  
     end
 end
@@ -158,7 +188,7 @@ end
 %% Interpolate HRTFs and generate results
 fprintf('Generating results...\n')
 
-%% First, run analysis for the reference (original HRTF)
+% First, run analysis for the reference (original HRTF)
 
 missingModels = runModels;
 saveFile = 1;
@@ -176,10 +206,9 @@ if isfile(filename)
 end
 
 if ~isfile(filename) || missingModels
-    
     fprintf('\tGenerating results for reference HRTF...\n')
 
-    %% Numerical analysis
+    % Numerical analysis
     % Magnitude and phase delay 110-point Lebedev grid
     results.mag = 20*log10(abs(H(:,indLeb,:)));
     results.pd = (-unwrap(angle(H(:,indLeb,1)))+unwrap(angle(H(:,indLeb,2))))./(2*pi*f)*1e6;
@@ -196,7 +225,7 @@ if ~isfile(filename) || missingModels
         'butterpoly', 10)*1e6;
     results.ild = getILD(h(:,indHP,:),fs);
 
-    %% Reijniers 2014
+    % Reijniers 2014
     fprintf('\t\tRunning reijniers2014...\n'); tic
     % Make DTF and SOFA object for Lebedev grid directions only
     dtf = getDTF(h(:,indLeb,:),fs);
@@ -214,7 +243,7 @@ if ~isfile(filename) || missingModels
     results.template_loc = template_loc; % template DTF
     fprintf('\t\tFinished running reijniers2014 (took %0.2f s)...\n',toc);
 
-    %% Run baumgartner2021
+    % Run baumgartner2021
     fprintf('\t\tRunning baumgartner2021...\n'); tic
     % Make DTF for median plane directions only
     dtf = getDTF(h(:,indMP,:),fs);
@@ -229,7 +258,7 @@ if ~isfile(filename) || missingModels
     results.template_ext = template_ext; % template DTFs
     fprintf('\t\tFinished running baumgartner2021 (took %0.2f s)...\n',toc);
 
-    %% Run jelfs2011
+    % Run jelfs2011
     fprintf('\t\tRunning jelfs2011...\n'); tic
     ndirs = numel(azHP);
     srm = nan(ndirs,1);
@@ -242,7 +271,7 @@ if ~isfile(filename) || missingModels
     fprintf('\t\tFinished running jelfs2011 (took %0.2f s)...\n',toc);
 
     if saveFile
-        %% Save results
+        % Save results
         fprintf('\t\tSaving results in %s...\n',filename)
         save(filename,'results')
     end
@@ -285,13 +314,13 @@ for N=N_vec % iterate through spatial orders
                 Y = AKsh(N, [], az*180/pi, el*180/pi, 'real').';
             end
 
-            %% Load hnm and interpolate to test grid
+            % Load hnm and interpolate to test grid
             hnm = load(sprintf('%s/hnm/ord%0.2d_%s.mat',workdir,N,name)).hnm;                
             isaligned = strcmp(name,'TA') || strcmp(name,'BiMagLS');
             hInterp = fromSH(hnm,fs,az,el,isaligned,r);
             HInterp = ffth(hInterp);
 
-            %% Numerical analysis
+            % Numerical analysis
             % Magnitude and phase delay error 110-point Lebedev grid
             mag = 20*log10(abs(HInterp(:,indLeb,:)));
             pd = (-unwrap(angle(HInterp(:,indLeb,1)))+unwrap(angle(HInterp(:,indLeb,2))))./(2*pi*f)*1e6;
@@ -317,7 +346,7 @@ for N=N_vec % iterate through spatial orders
         end
         
         if missingModels
-            %% Reijniers 2014
+            % Reijniers 2014
             fprintf('\t\tRunning reijniers2014...\n'); tic
             % Make DTF and SOFA object for Lebedev grid directions only
             dtf = getDTF(hInterp(:,indLeb,:),fs);
@@ -334,7 +363,7 @@ for N=N_vec % iterate through spatial orders
             results.pol_prec = reijniers2014_metrics(doa, 'precP'); % polar std
             fprintf('\t\tFinished running reijniers2014 (took %0.2f s)...\n',toc);
 
-            %% Run baumgartner2021
+            % Run baumgartner2021
             fprintf('\t\tRunning baumgartner2021...\n'); tic
             % Make DTF for median plane directions only
             dtf = getDTF(hInterp(:,indMP,:),fs);
@@ -347,7 +376,7 @@ for N=N_vec % iterate through spatial orders
             end
             fprintf('\t\tFinished running baumgartner2021 (took %0.2f s)...\n',toc);
 
-            %% Run jelfs2011
+            % Run jelfs2011
             fprintf('\t\tRunning jelfs2011...\n'); tic
             ndirs = numel(azHP);
             srm = nan(ndirs,1);
@@ -361,7 +390,7 @@ for N=N_vec % iterate through spatial orders
         end
         
         if saveFile
-            %% Save results
+            % Save results
             fprintf('\t\tSaving results in %s...\n',filename)
             save(filename,'results')
         end
