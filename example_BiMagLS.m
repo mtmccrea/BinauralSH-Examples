@@ -23,6 +23,7 @@
 %
 % EXTERNAL DEPENDENCIES:
 %   Auditory Modeling Toolbox (amtoolbox.sourceforge.net)
+%   (and its subsequent dependencies)
 %
 % AUTHOR: Isaac Engel - isaac.engel(at)imperial.ac.uk
 % August 2021
@@ -54,8 +55,8 @@ itdJND = 20; % ITD JND for plots, according to Klockgether 2016
 ildJND = 0.6; % ILD JND for plots, according to Klockgether 2016
 
 % HRTF file
-hrirname = 'hrtfs/FABIAN_HRIR_measured_HATO_0.sofa';
-% hrirname = 'hrtfs/FABIAN_HRIR_measured_HATO_0_48k_DFE.sofa'; % mtm added -  NOTE: 48k, diffuse-field equalized
+% hrirname = 'hrtfs/FABIAN_HRIR_measured_HATO_0.sofa';
+hrirname = '~/src/matlab/BinauralSH-Examples/hrtfs/FABIAN_HRIR_measured_HATO_0_48k_DFE.sofa'; % mtm added -  NOTE: 48k, diffuse-field equalized
 
 % Working directory
 workdir = 'processed_data'; % change as needed
@@ -90,12 +91,15 @@ f = linspace(0,fs/2,nfreqs).';
 % 1. MagLS
 test_conditions{1}.name = 'MagLS';
 test_conditions{1}.preproc = 'MagLS';
-% 2. TA (time-aligned HRTF)
-test_conditions{2}.name = 'TA';
-test_conditions{2}.preproc = 'TA';
+% 2. BiMagLS
+test_conditions{2}.name = 'BiMagLS';
+test_conditions{2}.preproc = 'BiMagLS';
 % 3. BiMagLS
-test_conditions{3}.name = 'BiMagLS';
-test_conditions{3}.preproc = 'BiMagLS';
+test_conditions{3}.name = 'SpSubMod'; % "SpSubMod see toSH.m
+test_conditions{3}.preproc = 'SpSubMod';
+% % 2. TA (time-aligned HRTF)
+% test_conditions{2}.name = 'TA';
+% test_conditions{2}.preproc = 'TA';
 
 ncond = length(test_conditions);
 
@@ -105,7 +109,7 @@ ncond = length(test_conditions);
 %       2 = diffuse field EQ (HRF from [8])
 %       3 = spherical head filters (SHF from [8]), adapted to tapering 
 %           weights if appropriate [6]
-flag_EQ = 1;
+flag_EQ = 0;
 %   tapering = apply weights to high SH orders to reduce side lobes:
 %       0 = off (default)
 %       1 = original Hann weights from Hold et al (2019)
@@ -171,14 +175,14 @@ for N=N_vec % iterate through spatial orders
         if isfile(filename)
             fprintf('\tFound %s. Skipping...\n',filename)
         else
-            fprintf('\tGenerating hnm...\n');
+            fprintf('\tGenerating hnm...');
 %             [hnm,~,varOut] = toSH(h,N,'az',az,'el',el,'fs',fs,'mode',preproc);
             [hnm,~,varOut] = toSH(h,N,'az',az,'el',el,'fs',fs,'mode',preproc, ...
                 'EQ', flag_EQ, ...
                 'tapering', flag_taper, ...
                 'dualBand', flag_dualBand ...
                 ); % mtm - EQ=1 add covariance constraint
-            fprintf('\t...done.\n\tSaving %s...\n',filename)
+            fprintf('\tdone.\n\t\tSaving %s...\n',filename)
             save(filename,'hnm','varOut','fs') % mtm - add fs
             fprintf('\t...done.\n')
         end  
@@ -187,6 +191,10 @@ end
 
 %% Interpolate HRTFs and generate results
 fprintf('Generating results...\n')
+
+if isempty(amt_flags)
+    amt_start; % mtm added, need to start for amt_flags to be initialized
+end
 
 % First, run analysis for the reference (original HRTF)
 
@@ -483,14 +491,24 @@ end
 % Load data from file
 names = {
     'ord03_MagLS'
-    'ord03_TA'
     'ord03_BiMagLS'
+    'ord03_SpSubMod'
 };
 labels = {
     'MagLS'
-    'Bilateral'
     'BiMagLS'
+    'SpSubMod'
 };
+% names = {
+%     'ord03_MagLS'
+%     'ord03_TA'
+%     'ord03_BiMagLS'
+% };
+% labels = {
+%     'MagLS'
+%     'Bilateral'
+%     'BiMagLS'
+% };
 n = numel(names);
 err_mag = zeros(nfreqs,n);
 err_pd = zeros(nfreqs,n);
@@ -582,16 +600,28 @@ end
 
 %% Fig. 3. Plot ITD/ILD per method, N=3
 % Load data from file
+% names = {
+%     'ord03_MagLS'
+%     'ord03_TA'
+%     'ord03_BiMagLS'
+%     'ref'
+% };
+% labels = {
+%     'MagLS'
+%     'Bilateral'
+%     'BiMagLS'
+%     'Reference'
+% };
 names = {
     'ord03_MagLS'
-    'ord03_TA'
     'ord03_BiMagLS'
+    'ord03_SpSubMod'
     'ref'
 };
 labels = {
     'MagLS'
-    'Bilateral'
     'BiMagLS'
+    'SpSubMod'
     'Reference'
 };
 n = numel(names);
@@ -748,15 +778,25 @@ end
 
 %% Fig. 4. Plot PSD per direction, N=3
 % Load data from file
+% names = {
+%     'ord03_MagLS'
+%     'ord03_TA'
+%     'ord03_BiMagLS'
+% };
+% labels = {
+%     'MagLS'
+%     'Bilateral'
+%     'BiMagLS'
+% };
 names = {
     'ord03_MagLS'
-    'ord03_TA'
     'ord03_BiMagLS'
+    'ord03_SpSubMod'
 };
 labels = {
     'MagLS'
-    'Bilateral'
     'BiMagLS'
+    'SpSubMod'
 };
 n = numel(names);
 ndirs = numel(az);
@@ -822,16 +862,28 @@ end
 if runModels
     
 % Load data from file
+% names = {
+%     'MagLS'
+%     'TA'
+%     'BiMagLS'
+%     'ref'
+% };
+% labels = {
+%     'MagLS'
+%     'Bilateral'
+%     'BiMagLS'
+%     'Reference'
+% };
 names = {
     'MagLS'
-    'TA'
     'BiMagLS'
+    'SpSubMod'
     'ref'
 };
 labels = {
     'MagLS'
-    'Bilateral'
     'BiMagLS'
+    'SpSubMod'
     'Reference'
 };
 n = numel(names);
@@ -932,16 +984,28 @@ end
 if runModels
     
 % Load data from file
+% names = {
+%     'MagLS'
+%     'TA'
+%     'BiMagLS'
+%     'ref'
+% };
+% labels = {
+%     'MagLS'
+%     'Bilateral'
+%     'BiMagLS'
+%     'Reference'
+% };
 names = {
     'MagLS'
-    'TA'
     'BiMagLS'
+    'SpSubMod'
     'ref'
 };
 labels = {
     'MagLS'
-    'Bilateral'
     'BiMagLS'
+    'SpSubMod'
     'Reference'
 };
 n = numel(names);
